@@ -137,3 +137,7 @@ Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 - Documentation: [GitHub Wiki](https://github.com/yourusername/smartclone-core/wiki)
 - Issues: [GitHub Issues](https://github.com/yourusername/smartclone-core/issues)
 - Discussions: [GitHub Discussions](https://github.com/yourusername/smartclone-core/discussions)
+
+## License
+
+This project is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.
