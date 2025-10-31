@@ -1,0 +1,64 @@
+labels: ["show-and-tell"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Show and Tell
+
+        Share what you've built with SmartClone Core! We love seeing how the community uses the library.
+
+  - type: input
+    id: title
+    attributes:
+      label: Project Title
+      description: What's your project called?
+      placeholder: My Awesome AI App
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Project Description
+      description: Tell us about your project
+      placeholder: I built a...
+    validations:
+      required: true
+
+  - type: textarea
+    id: features
+    attributes:
+      label: Key Features
+      description: What are the main features using SmartClone Core?
+      placeholder: |
+        - Feature 1
+        - Feature 2
+    validations:
+      required: false
+
+  - type: input
+    id: link
+    attributes:
+      label: Project Link
+      description: Link to your project (GitHub, website, demo, etc.)
+      placeholder: https://...
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or Demo
+      description: Add screenshots or a demo video
+    validations:
+      required: false
+
+  - type: textarea
+    id: tech-stack
+    attributes:
+      label: Tech Stack
+      description: What other technologies are you using?
+      placeholder: React, TypeScript, etc.
+    validations:
+      required: false

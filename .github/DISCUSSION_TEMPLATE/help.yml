@@ -1,0 +1,65 @@
+labels: ["help-wanted"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Get Help
+
+        Need help with SmartClone Core? Ask here! Please search existing discussions first to see if your question has been answered.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you need help with?
+      description: Describe your question or problem
+      placeholder: I'm trying to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Code Sample
+      description: Share relevant code if applicable
+      render: typescript
+      placeholder: |
+        import SmartClone from 'smartclone-core';
+
+        // Your code here
+    validations:
+      required: false
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error Message
+      description: If you're getting an error, paste it here
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: What solutions have you already attempted?
+      placeholder: I tried...
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: SmartClone Core Version
+      placeholder: "0.1.0"
+    validations:
+      required: false
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser & Version
+      placeholder: "Chrome 120"
+    validations:
+      required: false

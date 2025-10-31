@@ -1,0 +1,16 @@
+# Source
+src/
+
+# Config files
+tsconfig.json
+rollup.config.js
+jest.config.js
+.eslintrc.js
+.gitignore
+
+# Examples & tests
+examples/
+tests/
+
+# Misc
+.github/

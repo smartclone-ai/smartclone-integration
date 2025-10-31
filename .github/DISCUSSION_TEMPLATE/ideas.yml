@@ -1,0 +1,36 @@
+labels: ["idea"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Share Your Idea
+
+        We'd love to hear your ideas for SmartClone Core! This is the place to brainstorm and discuss potential features, improvements, or use cases.
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your Idea
+      description: Describe your idea in detail
+      placeholder: I was thinking about...
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: What problem does this solve or what value does it provide?
+      placeholder: This would help with...
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Potential Implementation
+      description: Any thoughts on how this could be implemented?
+      placeholder: This could work by...
+    validations:
+      required: false

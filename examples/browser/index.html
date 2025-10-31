@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartClone Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow: auto;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #output {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>SmartClone Demo</h1>
+    <div>
+        <button id="detect">Detect Capabilities</button>
+        <button id="allocate">Allocate Resources</button>
+        <button id="store">Store Vector Data</button>
+        <button id="features">Check Features</button>
+    </div>
+    <div id="output">
+        <h3>Output:</h3>
+        <pre id="result">Click a button to see SmartClone in action</pre>
+    </div>
+
+    <script type="module">
+        // This will be replaced with the actual library import when built
+        // import SmartClone from '../../dist/index.esm.js';
+
+        // Mock implementation for example
+        class SmartClone {
+            async initialize() {
+                console.log('Initialized');
+                return this;
+            }
+
+            async getCapabilities() {
+                return {
+                    cpu: { cores: 4, supported: true },
+                    memory: 8,
+                    gpu: { supported: true, type: 'integrated' }
+                };
+            }
+
+            async allocateResources() {
+                return {
+                    device: 'gpu',
+                    modelTier: 'medium',
+                    quantization: '8bit',
+                    maxBatchSize: 4
+                };
+            }
+
+            async store(data) {
+                return 'vec_' + Date.now();
+            }
+
+            async isFeatureEnabled(feature) {
+                return true;
+            }
+
+            async getFeatureLevel(feature) {
+                return 'full';
+            }
+        }
+
+        // Create SmartClone instance
+        const sc = new SmartClone({
+            models: {
+                small: { path: 'model-small.onnx' },
+                medium: { path: 'model-medium.onnx' },
+                large: { path: 'model-large.onnx' }
+            }
+        });
+
+        await sc.initialize();
+
+        // Set up button handlers
+        document.getElementById('detect').addEventListener('click', async () => {
+            const capabilities = await sc.getCapabilities();
+            document.getElementById('result').textContent = JSON.stringify(capabilities, null, 2);
+        });
+
+        document.getElementById('allocate').addEventListener('click', async () => {
+            const allocation = await sc.allocateResources({
+                taskType: 'inference',
+                priority: 'balanced'
+            });
+            document.getElementById('result').textContent = JSON.stringify(allocation, null, 2);
+        });
+
+        document.getElementById('store').addEventListener('click', async () => {
+            const vector = Array(128).fill(0).map(() => Math.random());
+            const id = await sc.store(vector, { type: 'vector' });
+            document.getElementById('result').textContent = `Stored vector with ID: ${id}`;
+        });
+
+        document.getElementById('features').addEventListener('click', async () => {
+            const features = ['text-generation', 'image-recognition', 'voice-processing'];
+            const results = {};
+
+            for (const feature of features) {
+                const enabled = await sc.isFeatureEnabled(feature);
+                const level = await sc.getFeatureLevel(feature);
+                results[feature] = { enabled, level };
+            }
+
+            document.getElementById('result').textContent = JSON.stringify(results, null, 2);
+        });
+    </script>
+</body>
+</html>
