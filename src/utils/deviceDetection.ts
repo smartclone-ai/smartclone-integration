@@ -49,6 +49,17 @@ export interface DeviceCapabilities {
   } | null;
 }
 
+export interface EnhancedDeviceCapabilities extends DeviceCapabilities {
+  webgpu: boolean;
+  webgl2: boolean;
+  webassembly: boolean;
+  tensorflowjs: boolean;
+  onnxjs: boolean;
+  transformersjs: boolean;
+  memoryGb: number;
+  cpuCores: number;
+}
+
 /**
  * Detects device capabilities for AI workloads
  */
@@ -82,7 +93,7 @@ export async function detectDeviceCapabilities(): Promise<DeviceCapabilities> {
           supported: true,
           type: 'integrated', // Default assumption
           webgl2: !!canvas.getContext('webgl2'),
-          webgpu: 'gpu' in navigator
+          webgpu: typeof navigator !== 'undefined' && 'gpu' in navigator
         };
 
         // Try to get renderer info
@@ -133,4 +144,98 @@ export async function detectDeviceCapabilities(): Promise<DeviceCapabilities> {
     gpu,
     battery
   };
+}
+
+/**
+ * Enhanced detection that also probes individual AI framework capabilities.
+ */
+export async function detectEnhancedCapabilities(): Promise<EnhancedDeviceCapabilities> {
+  const baseline = await detectDeviceCapabilities();
+  const [webgpu, webgl2, webassembly, tensorflowjs, onnxjs, transformersjs] = await Promise.all([
+    testWebGPU(),
+    testWebGL2(),
+    testWebAssembly(),
+    testTensorFlowJS(),
+    testONNXJS(),
+    testTransformersJS()
+  ]);
+
+  const memoryGb = estimateMemory(baseline);
+  const cpuCores = typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+    ? navigator.hardwareConcurrency
+    : baseline.cpu.cores || 4;
+
+  return {
+    ...baseline,
+    webgpu,
+    webgl2,
+    webassembly,
+    tensorflowjs,
+    onnxjs,
+    transformersjs,
+    memoryGb,
+    cpuCores
+  };
+}
+
+async function testWebGPU(): Promise<boolean> {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+  return 'gpu' in navigator;
+}
+
+async function testWebGL2(): Promise<boolean> {
+  if (typeof document === 'undefined') {
+    return false;
+  }
+
+  try {
+    const canvas = document.createElement('canvas');
+    return !!canvas.getContext('webgl2');
+  } catch {
+    return false;
+  }
+}
+
+async function testWebAssembly(): Promise<boolean> {
+  return typeof WebAssembly === 'object';
+}
+
+async function testTensorFlowJS(): Promise<boolean> {
+  try {
+    const tf = await import('@tensorflow/tfjs');
+    if (typeof tf.ready === 'function') {
+      await tf.ready();
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function testONNXJS(): Promise<boolean> {
+  try {
+    await import('onnxruntime-web');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function testTransformersJS(): Promise<boolean> {
+  try {
+    await import('@xenova/transformers');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function estimateMemory(baseline: DeviceCapabilities): number {
+  if (typeof navigator !== 'undefined' && 'deviceMemory' in navigator) {
+    return (navigator as any).deviceMemory || 4;
+  }
+
+  return baseline.memory || 4;
 }
