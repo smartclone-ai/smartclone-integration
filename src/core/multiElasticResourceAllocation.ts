@@ -14,12 +14,17 @@
  * limitations under the License.
  */
 
-/**
- * Hardware-adaptive AI scaling for browser environments
- * Automatically adjusts AI complexity based on detected hardware
- */
+import {
+  detectEnhancedCapabilities,
+  type EnhancedDeviceCapabilities
+} from '../utils/deviceDetection';
+import { TensorFlowAdapter } from '../adapters/ai/TensorFlowAdapter';
+import { ONNXAdapter } from '../adapters/ai/ONNXAdapter';
+import { TransformersAdapter } from '../adapters/ai/TransformersAdapter';
 
-// Types for the function
+/**
+ * Resource allocation options for AI workloads
+ */
 export interface ResourceAllocationOptions {
   taskType?: 'inference' | 'embedding' | 'training';
   priority?: 'performance' | 'battery' | 'quality' | 'balanced';
@@ -34,191 +39,233 @@ export interface ResourceAllocation {
   offloadHeavyOps: boolean;
   splitCompute: boolean;
   model: any | null;
+  technology?: string;
+  modelId?: string;
+  benchmarkMs?: number | null;
+  score?: number;
 }
 
-// Device capability detection interface
-interface DeviceCapabilities {
-  cpu: {
-    cores: number;
-    supported: boolean;
-  };
-  memory: number;
-  gpu: {
-    supported: boolean;
-    type?: 'integrated' | 'dedicated' | 'none';
-    renderer?: string;
-    webgl2?: boolean;
-    webgpu?: boolean;
-  };
-  battery?: {
-    level: number;
-    charging: boolean;
-  } | null;
+export interface TechnologySelection {
+  technology: string;
+  model: string;
+  score: number;
+  latencyMs: number | null;
 }
+
+type TechnologyConfig = {
+  priority: number;
+  requires: string[];
+  models: string[];
+};
 
 /**
- * Detects device capabilities for AI workloads
+ * Multi-framework technology selector with capability-aware fallbacks.
  */
-async function detectDeviceCapabilities(): Promise<DeviceCapabilities> {
-  // Detect CPU
-  const cpuCores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 1 : 1;
-
-  // Estimate memory (simplified)
-  const estimatedMemory = typeof navigator !== 'undefined' && 'deviceMemory' in navigator ?
-    (navigator as any).deviceMemory || 4 : 4;
-
-  // Detect GPU (simplified)
-  let gpu: {
-    supported: boolean;
-    type?: 'integrated' | 'dedicated' | 'none';
-    renderer?: string;
-    webgl2?: boolean;
-    webgpu?: boolean;
-  } = { supported: false };
-
-  // Check if in browser environment
-  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-    try {
-      const canvas = document.createElement('canvas');
-      const gl = (canvas.getContext('webgl2') ||
-                canvas.getContext('webgl') ||
-                canvas.getContext('experimental-webgl')) as WebGLRenderingContext | null;
-
-      if (gl) {
-        gpu = {
-          supported: true,
-          type: 'integrated', // Default assumption
-          webgl2: !!canvas.getContext('webgl2'),
-          webgpu: 'gpu' in navigator
-        };
-
-        // Try to get renderer info
-        try {
-          const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-          if (debugInfo) {
-            const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-            gpu.renderer = renderer;
-
-            // Check for keywords indicating dedicated GPU
-            if (/nvidia|geforce|rtx|gtx/i.test(renderer) ||
-                /amd|radeon|rx/i.test(renderer) ||
-                /intel\s+arc/i.test(renderer)) {
-              gpu.type = 'dedicated';
-            }
-          }
-        } catch (e) {
-          console.warn('Could not detect GPU details', e);
-        }
-      }
-    } catch (e) {
-      console.warn('Error detecting GPU', e);
-    }
-  }
-
-  // Detect battery if available
-  let battery = null;
-  if (typeof navigator !== 'undefined' && 'getBattery' in navigator) {
-    try {
-      const batteryManager = await (navigator as any).getBattery();
-      battery = {
-        level: batteryManager.level,
-        charging: batteryManager.charging
-      };
-    } catch (e) {
-      console.warn('Battery detection failed', e);
-    }
-  }
-
-  return {
-    cpu: {
-      cores: cpuCores,
-      supported: true
+export class MultiElasticResourceAllocation {
+  private technologyStack: Record<string, TechnologyConfig> = {
+    webllm: {
+      priority: 1,
+      requires: ['webgpu'],
+      models: ['Llama-3.1-8B-Instruct-q4f16_1', 'Phi-3-mini-4k-instruct-q4f16_1']
     },
-    memory: estimatedMemory,
-    gpu,
-    battery
+    tensorflowjs: {
+      priority: 2,
+      requires: ['webgl2'],
+      models: ['universal-sentence-encoder', 'mobilenet']
+    },
+    onnxjs: {
+      priority: 3,
+      requires: ['webassembly'],
+      models: ['distilbert-base-uncased', 'gpt2']
+    },
+    transformersjs: {
+      priority: 4,
+      requires: ['webassembly'],
+      models: ['Xenova/distilbert-base-uncased-finetuned-sst-2-english']
+    }
   };
+
+  private benchmarks: Map<string, number> = new Map();
+
+  /**
+   * Select the optimal AI technology for the provided query and device capabilities.
+   */
+  async selectOptimalTechnology(
+    query: string,
+    capabilities: EnhancedDeviceCapabilities
+  ): Promise<TechnologySelection> {
+    const evaluated: TechnologySelection[] = [];
+
+    for (const [tech, config] of Object.entries(this.technologyStack)) {
+      if (!this.meetsRequirements(capabilities, config.requires)) {
+        continue;
+      }
+
+      const modelId = config.models[0];
+      const result = await this.testTechnology(tech, modelId);
+      if (!result.success) {
+        continue;
+      }
+
+      const latency = result.latencyMs;
+      if (latency != null) {
+        this.benchmarks.set(tech, latency);
+      }
+
+      const score = this.calculateScore(tech, config.priority, latency);
+      evaluated.push({
+        technology: tech,
+        model: modelId,
+        score,
+        latencyMs: latency
+      });
+    }
+
+    if (evaluated.length === 0) {
+      return {
+        technology: 'cloud',
+        model: 'api-fallback',
+        score: 0,
+        latencyMs: null
+      };
+    }
+
+    evaluated.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const latencyA = a.latencyMs ?? Number.POSITIVE_INFINITY;
+      const latencyB = b.latencyMs ?? Number.POSITIVE_INFINITY;
+      return latencyA - latencyB;
+    });
+
+    return evaluated[0];
+  }
+
+  private meetsRequirements(
+    capabilities: EnhancedDeviceCapabilities,
+    requirements: string[]
+  ): boolean {
+    return requirements.every((requirement) => Boolean((capabilities as any)[requirement]));
+  }
+
+  private async testTechnology(
+    tech: string,
+    modelId: string
+  ): Promise<{ success: boolean; latencyMs: number | null }> {
+    const start = this.now();
+
+    try {
+      switch (tech) {
+        case 'webllm': {
+          const webllm = await import('@mlc-ai/web-llm');
+          if (typeof webllm !== 'object') {
+            throw new Error('WebLLM runtime unavailable');
+          }
+          break;
+        }
+        case 'tensorflowjs': {
+          const adapter = new TensorFlowAdapter();
+          await adapter.probe(modelId);
+          break;
+        }
+        case 'onnxjs': {
+          const adapter = new ONNXAdapter();
+          await adapter.probe(modelId);
+          break;
+        }
+        case 'transformersjs': {
+          const adapter = new TransformersAdapter();
+          await adapter.probe(modelId);
+          break;
+        }
+        default:
+          return { success: false, latencyMs: null };
+      }
+
+      const latency = this.now() - start;
+      return { success: true, latencyMs: latency };
+    } catch (error) {
+      console.warn(`[MultiElasticResourceAllocation] ${tech} probe failed`, error);
+      return { success: false, latencyMs: null };
+    }
+  }
+
+  private calculateScore(technology: string, priority: number, latencyMs: number | null): number {
+    const priorityWeight = Math.max(0, 5 - priority) * 100;
+    const latencyWeight = latencyMs == null ? 0 : Math.max(0, 500 - latencyMs);
+    const historicLatency = this.benchmarks.get(technology);
+    const historicBoost = historicLatency == null ? 0 : Math.max(0, 500 - historicLatency) * 0.2;
+    return priorityWeight + latencyWeight + historicBoost;
+  }
+
+  private now(): number {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+      return performance.now();
+    }
+
+    return Date.now();
+  }
 }
 
+const globalAllocator = new MultiElasticResourceAllocation();
+
 /**
- * Performs hardware-adaptive AI scaling based on detected capabilities
- * @param options Configuration options
- * @returns Allocation decision with selected models and config
+ * Performs hardware-adaptive AI scaling based on detected capabilities.
  */
 export async function multiElasticResourceAllocation(
-  options: ResourceAllocationOptions = {}
+  options: ResourceAllocationOptions = {},
+  capabilities?: EnhancedDeviceCapabilities
 ): Promise<ResourceAllocation> {
   const {
     taskType = 'inference',
     priority = 'balanced',
-    models = {},
+    models = {}
   } = options;
 
-  // Detect device capabilities
-  const capabilities = await detectDeviceCapabilities();
+  const enhancedCapabilities = capabilities ?? await detectEnhancedCapabilities();
+  const recommendation = await globalAllocator.selectOptimalTechnology(
+    taskType,
+    enhancedCapabilities
+  );
 
-  // Initialize allocation with defaults
-  let allocation: ResourceAllocation = {
-    device: 'cpu',
-    modelTier: 'small',
-    maxBatchSize: 1,
-    quantization: '8bit',
-    offloadHeavyOps: false,
-    splitCompute: false,
-    model: null
-  };
+  const memoryGb = enhancedCapabilities.memoryGb ?? 4;
+  const cpuCores = enhancedCapabilities.cpuCores ?? 2;
 
-  // Adjust based on capabilities
-  if (capabilities.gpu.supported) {
-    allocation.device = 'gpu';
-    allocation.modelTier = 'medium';
-    allocation.maxBatchSize = 4;
+  const device: ResourceAllocation['device'] = enhancedCapabilities.webgpu
+    ? 'webgpu'
+    : enhancedCapabilities.webgl2
+      ? 'webgl'
+      : enhancedCapabilities.gpu?.supported
+        ? 'gpu'
+        : 'cpu';
 
-    // If dedicated GPU, we can use larger model
-    if (capabilities.gpu.type === 'dedicated') {
-      allocation.modelTier = 'large';
-      allocation.quantization = '16bit';
-      allocation.maxBatchSize = 8;
-    }
-  }
+  let modelTier: ResourceAllocation['modelTier'] = memoryGb >= 12 ? 'large' : memoryGb >= 6 ? 'medium' : 'small';
+  let quantization: ResourceAllocation['quantization'] = modelTier === 'large' ? '16bit' : '8bit';
 
-  if (capabilities.memory > 8) { // >8GB RAM
-    allocation.modelTier = 'large';
-    allocation.quantization = '16bit';
-  }
-
-  if (capabilities.battery && capabilities.battery.level < 0.2 && !capabilities.battery.charging) {
-    // Battery saving mode
-    allocation.modelTier = 'small';
-    allocation.device = 'cpu';
-  }
-
-  // Override based on priority
   if (priority === 'performance') {
-    allocation.modelTier = allocation.modelTier === 'small' ? 'medium' : 'large';
-    allocation.quantization = '16bit';
-    allocation.offloadHeavyOps = false;
+    modelTier = modelTier === 'small' ? 'medium' : 'large';
+    quantization = '16bit';
   } else if (priority === 'quality') {
-    allocation.modelTier = 'large';
-    allocation.quantization = capabilities.memory > 16 ? '32bit' : '16bit';
-    allocation.maxBatchSize = 1; // Focus on quality per inference
+    quantization = memoryGb > 16 ? '32bit' : '16bit';
   } else if (priority === 'battery') {
-    allocation.modelTier = 'small';
-    allocation.quantization = '8bit';
-    allocation.offloadHeavyOps = true;
-    allocation.device = 'cpu'; // CPU might be more efficient for some tasks
+    modelTier = 'small';
+    quantization = '8bit';
   }
 
-  // Select actual model
-  allocation.model = models[allocation.modelTier] || null;
+  const maxBatchSize = Math.max(1, Math.round(cpuCores / (priority === 'performance' ? 1 : 2)));
+  const offloadHeavyOps = !enhancedCapabilities.webgpu && !enhancedCapabilities.webgl2;
+  const splitCompute = modelTier === 'large' && memoryGb < 8;
 
-  // Determine if we need to split compute between local and remote
-  if (
-    (allocation.modelTier === 'large' && capabilities.memory < 4) ||
-    (allocation.modelTier === 'medium' && capabilities.memory < 2)
-  ) {
-    allocation.splitCompute = true;
-  }
-
-  return allocation;
+  return {
+    device,
+    modelTier,
+    quantization,
+    maxBatchSize,
+    offloadHeavyOps,
+    splitCompute,
+    model: models[modelTier] ?? null,
+    technology: recommendation.technology,
+    modelId: recommendation.model,
+    benchmarkMs: recommendation.latencyMs,
+    score: recommendation.score
+  };
 }

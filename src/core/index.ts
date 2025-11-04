@@ -15,9 +15,11 @@
  */
 
 export {
+  MultiElasticResourceAllocation,
   multiElasticResourceAllocation,
   type ResourceAllocationOptions,
-  type ResourceAllocation
+  type ResourceAllocation,
+  type TechnologySelection
 } from './multiElasticResourceAllocation';
 
 export {

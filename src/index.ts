@@ -15,6 +15,7 @@
  */
 
 import {
+  MultiElasticResourceAllocation,
   multiElasticResourceAllocation,
   encryptedHybridStorage,
   capabilityAwareFeatureActivation,
@@ -23,7 +24,8 @@ import {
   type StoreOptions,
   type RetrieveOptions,
   type QueryOptions,
-  type FeatureActivationOptions
+  type FeatureActivationOptions,
+  type TechnologySelection
 } from './core';
 
 import * as utils from './utils';
@@ -45,6 +47,7 @@ export interface SmartCloneOptions {
  * SmartClone: Hardware-adaptive AI scaling with hybrid storage and progressive enhancement
  */
 export default class SmartClone {
+  public readonly resourceAllocation: MultiElasticResourceAllocation;
   private options: SmartCloneOptions;
   private initialized: boolean = false;
   private _storage: any = null;
@@ -66,6 +69,8 @@ export default class SmartClone {
       forceEnable: false,
       ...options
     };
+
+    this.resourceAllocation = new MultiElasticResourceAllocation();
   }
 
   /**
@@ -75,7 +80,7 @@ export default class SmartClone {
     if (this.initialized) return this;
 
     // Detect capabilities first
-    this._capabilities = await utils.deviceDetection.detectDeviceCapabilities();
+    this._capabilities = await utils.deviceDetection.detectEnhancedCapabilities();
 
     // Initialize storage
     this._storage = await encryptedHybridStorage({
@@ -100,7 +105,7 @@ export default class SmartClone {
    */
   async getCapabilities() {
     if (!this._capabilities) {
-      this._capabilities = await utils.deviceDetection.detectDeviceCapabilities();
+      this._capabilities = await utils.deviceDetection.detectEnhancedCapabilities();
     }
     return this._capabilities;
   }
@@ -111,10 +116,11 @@ export default class SmartClone {
   async allocateResources(options: ResourceAllocationOptions = {}) {
     if (!this.initialized) await this.initialize();
 
+    const capabilities = await this.getCapabilities();
     return multiElasticResourceAllocation({
       ...options,
       models: this.options.models
-    });
+    }, capabilities);
   }
 
   /**
@@ -207,6 +213,7 @@ export default class SmartClone {
 
 // Export individual components
 export {
+  MultiElasticResourceAllocation,
   multiElasticResourceAllocation,
   encryptedHybridStorage,
   capabilityAwareFeatureActivation
@@ -222,5 +229,6 @@ export type {
   StoreOptions,
   RetrieveOptions,
   QueryOptions,
-  FeatureActivationOptions
+  FeatureActivationOptions,
+  TechnologySelection
 };
