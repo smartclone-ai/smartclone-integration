@@ -16,11 +16,11 @@
 
 import {
   detectEnhancedCapabilities,
+  type DeviceCapabilities,
   type EnhancedDeviceCapabilities
 } from '../utils/deviceDetection';
-import { TensorFlowAdapter } from '../adapters/ai/TensorFlowAdapter';
-import { ONNXAdapter } from '../adapters/ai/ONNXAdapter';
-import { TransformersAdapter } from '../adapters/ai/TransformersAdapter';
+import type { MultiElasticRecommendation } from '../types/SmartCloneTypes';
+export type { MultiElasticRecommendation } from '../types/SmartCloneTypes';
 
 /**
  * Resource allocation options for AI workloads
@@ -42,20 +42,14 @@ export interface ResourceAllocation {
   technology?: string;
   modelId?: string;
   benchmarkMs?: number | null;
-  score?: number;
-}
-
-export interface TechnologySelection {
-  technology: string;
-  model: string;
-  score: number;
-  latencyMs: number | null;
+  confidence?: number;
 }
 
 type TechnologyConfig = {
   priority: number;
   requires: string[];
   models: string[];
+  capabilities: string[];
 };
 
 /**
@@ -63,81 +57,99 @@ type TechnologyConfig = {
  */
 export class MultiElasticResourceAllocation {
   private technologyStack: Record<string, TechnologyConfig> = {
-    webllm: {
+    transformers: {
       priority: 1,
-      requires: ['webgpu'],
-      models: ['Llama-3.1-8B-Instruct-q4f16_1', 'Phi-3-mini-4k-instruct-q4f16_1']
-    },
-    tensorflowjs: {
-      priority: 2,
-      requires: ['webgl2'],
-      models: ['universal-sentence-encoder', 'mobilenet']
-    },
-    onnxjs: {
-      priority: 3,
       requires: ['webassembly'],
-      models: ['distilbert-base-uncased', 'gpt2']
+      models: ['Xenova/gpt2', 'Xenova/distilgpt2'],
+      capabilities: ['text-generation', 'conversation']
     },
-    transformersjs: {
+    webllm: {
+      priority: 2,
+      requires: ['webgpu'],
+      models: ['Llama-3.1-8B-Instruct-q4f16_1', 'Phi-3-mini-4k-instruct-q4f16_1'],
+      capabilities: ['text-generation', 'conversation', 'reasoning']
+    },
+    tensorflow: {
+      priority: 3,
+      requires: ['webgl2', 'webassembly'],
+      models: ['universal-sentence-encoder', 'mobilenet'],
+      capabilities: ['text-analysis', 'classification']
+    },
+    onnx: {
       priority: 4,
       requires: ['webassembly'],
-      models: ['Xenova/distilbert-base-uncased-finetuned-sst-2-english']
+      models: ['distilbert-base-uncased', 'gpt2'],
+      capabilities: ['text-analysis', 'basic-generation']
     }
   };
 
   private benchmarks: Map<string, number> = new Map();
+
+  getBenchmark(technology: string): number | undefined {
+    return this.benchmarks.get(technology);
+  }
 
   /**
    * Select the optimal AI technology for the provided query and device capabilities.
    */
   async selectOptimalTechnology(
     query: string,
-    capabilities: EnhancedDeviceCapabilities
-  ): Promise<TechnologySelection> {
-    const evaluated: TechnologySelection[] = [];
+    capabilities: DeviceCapabilities | EnhancedDeviceCapabilities,
+    requiredCapability: 'conversation' | 'analysis' | 'classification' = 'conversation'
+  ): Promise<MultiElasticRecommendation> {
+    const enhancedCapabilities = this.normalizeCapabilities(capabilities);
 
-    for (const [tech, config] of Object.entries(this.technologyStack)) {
-      if (!this.meetsRequirements(capabilities, config.requires)) {
+    const suitableTechs = Object.entries(this.technologyStack)
+      .filter(([, config]) => config.capabilities.includes(requiredCapability))
+      .sort(([, a], [, b]) => a.priority - b.priority);
+
+    for (const [tech, config] of suitableTechs) {
+      if (!this.meetsRequirements(enhancedCapabilities, config.requires)) {
         continue;
       }
 
       const modelId = config.models[0];
-      const result = await this.testTechnology(tech, modelId);
-      if (!result.success) {
-        continue;
+      const success = await this.benchmarkTechnology(tech, modelId);
+      if (success) {
+        const benchmark = this.benchmarks.get(tech) ?? null;
+        return {
+          technology: tech,
+          model: modelId,
+          capability: requiredCapability,
+          fallbacks: config.models.slice(1),
+          confidence: this.calculateConfidence(config.priority, benchmark)
+        };
       }
-
-      const latency = result.latencyMs;
-      if (latency != null) {
-        this.benchmarks.set(tech, latency);
-      }
-
-      const score = this.calculateScore(tech, config.priority, latency);
-      evaluated.push({
-        technology: tech,
-        model: modelId,
-        score,
-        latencyMs: latency
-      });
     }
 
-    if (evaluated.length === 0) {
-      return {
-        technology: 'cloud',
-        model: 'api-fallback',
-        score: 0,
-        latencyMs: null
-      };
+    return {
+      technology: 'cloud',
+      model: 'api-fallback',
+      capability: requiredCapability,
+      fallbacks: [],
+      confidence: 0
+    };
+  }
+
+  private normalizeCapabilities(
+    capabilities: DeviceCapabilities | EnhancedDeviceCapabilities
+  ): EnhancedDeviceCapabilities {
+    if ('webassembly' in capabilities) {
+      return capabilities as EnhancedDeviceCapabilities;
     }
 
-    evaluated.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      const latencyA = a.latencyMs ?? Number.POSITIVE_INFINITY;
-      const latencyB = b.latencyMs ?? Number.POSITIVE_INFINITY;
-      return latencyA - latencyB;
-    });
-
-    return evaluated[0];
+    const memoryGb = typeof capabilities.memory === 'number' ? capabilities.memory : 4;
+    return {
+      ...(capabilities as DeviceCapabilities),
+      webgpu: false,
+      webgl2: Boolean(capabilities?.gpu?.webgl2),
+      webassembly: typeof WebAssembly !== 'undefined',
+      tensorflowjs: false,
+      onnxjs: false,
+      transformersjs: false,
+      memoryGb,
+      cpuCores: capabilities.cpu?.cores ?? 1
+    };
   }
 
   private meetsRequirements(
@@ -147,54 +159,79 @@ export class MultiElasticResourceAllocation {
     return requirements.every((requirement) => Boolean((capabilities as any)[requirement]));
   }
 
-  private async testTechnology(
-    tech: string,
-    modelId: string
-  ): Promise<{ success: boolean; latencyMs: number | null }> {
-    const start = this.now();
+  private async benchmarkTechnology(tech: string, modelId: string): Promise<boolean> {
+    const startTime = this.now();
 
     try {
       switch (tech) {
-        case 'webllm': {
-          const webllm = await import('@mlc-ai/web-llm');
-          if (typeof webllm !== 'object') {
-            throw new Error('WebLLM runtime unavailable');
-          }
+        case 'transformers':
+          await this.testTransformersJS(modelId);
           break;
-        }
-        case 'tensorflowjs': {
-          const adapter = new TensorFlowAdapter();
-          await adapter.probe(modelId);
+        case 'tensorflow':
+          await this.testTensorFlowJS();
           break;
-        }
-        case 'onnxjs': {
-          const adapter = new ONNXAdapter();
-          await adapter.probe(modelId);
+        case 'onnx':
+          await this.testONNXJS();
           break;
-        }
-        case 'transformersjs': {
-          const adapter = new TransformersAdapter();
-          await adapter.probe(modelId);
+        case 'webllm':
+          await this.testWebLLM(modelId);
           break;
-        }
         default:
-          return { success: false, latencyMs: null };
+          return false;
       }
 
-      const latency = this.now() - start;
-      return { success: true, latencyMs: latency };
+      const loadTime = this.now() - startTime;
+      this.benchmarks.set(tech, loadTime);
+      console.log(`✅ ${tech} benchmark: ${loadTime.toFixed(0)}ms`);
+
+      return loadTime < 30000;
     } catch (error) {
-      console.warn(`[MultiElasticResourceAllocation] ${tech} probe failed`, error);
-      return { success: false, latencyMs: null };
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(`❌ ${tech} benchmark failed:`, message);
+      return false;
     }
   }
 
-  private calculateScore(technology: string, priority: number, latencyMs: number | null): number {
-    const priorityWeight = Math.max(0, 5 - priority) * 100;
-    const latencyWeight = latencyMs == null ? 0 : Math.max(0, 500 - latencyMs);
-    const historicLatency = this.benchmarks.get(technology);
-    const historicBoost = historicLatency == null ? 0 : Math.max(0, 500 - historicLatency) * 0.2;
-    return priorityWeight + latencyWeight + historicBoost;
+  private calculateConfidence(priority: number, benchmark: number | null): number {
+    const base = Math.max(0.1, 1 - (benchmark ?? 30000) / 60000);
+    const priorityBoost = Math.max(0, (5 - priority) * 0.1);
+    return Math.min(1, Number((base + priorityBoost).toFixed(2)));
+  }
+
+  private async testTransformersJS(modelId: string) {
+    const { pipeline } = await import('@xenova/transformers');
+    return pipeline('text-generation', modelId, { quantized: true });
+  }
+
+  private async testTensorFlowJS() {
+    const tf = await import('@tensorflow/tfjs');
+    await import('@tensorflow/tfjs-backend-webgl');
+    if (typeof tf.setBackend === 'function') {
+      await tf.setBackend('webgl');
+    }
+    if (typeof tf.ready === 'function') {
+      await tf.ready();
+    }
+    return tf;
+  }
+
+  private async testONNXJS() {
+    const ort = await import('onnxruntime-web');
+    if (!(ort as any).InferenceSession) {
+      throw new Error('onnxruntime-web unavailable');
+    }
+    return ort;
+  }
+
+  private async testWebLLM(modelId: string) {
+    const webllm = await import('@mlc-ai/web-llm');
+    if (typeof (webllm as any).CreateMLCEngine !== 'function') {
+      throw new Error('WebLLM runtime unavailable');
+    }
+    if (typeof (webllm as any).CreateMLCEngine === 'function') {
+      await (webllm as any).CreateMLCEngine({ model: modelId, logLevel: 'error' });
+    }
+    return webllm;
   }
 
   private now(): number {
@@ -224,7 +261,8 @@ export async function multiElasticResourceAllocation(
   const enhancedCapabilities = capabilities ?? await detectEnhancedCapabilities();
   const recommendation = await globalAllocator.selectOptimalTechnology(
     taskType,
-    enhancedCapabilities
+    enhancedCapabilities,
+    taskType === 'inference' ? 'conversation' : 'analysis'
   );
 
   const memoryGb = enhancedCapabilities.memoryGb ?? 4;
@@ -265,7 +303,7 @@ export async function multiElasticResourceAllocation(
     model: models[modelTier] ?? null,
     technology: recommendation.technology,
     modelId: recommendation.model,
-    benchmarkMs: recommendation.latencyMs,
-    score: recommendation.score
+    benchmarkMs: globalAllocator.getBenchmark(recommendation.technology) ?? null,
+    confidence: recommendation.confidence
   };
 }

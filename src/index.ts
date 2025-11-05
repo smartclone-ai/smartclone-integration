@@ -25,8 +25,9 @@ import {
   type RetrieveOptions,
   type QueryOptions,
   type FeatureActivationOptions,
-  type TechnologySelection
+  type MultiElasticRecommendation
 } from './core';
+import { SmartCloneIntegration } from './SmartCloneIntegration';
 
 import * as utils from './utils';
 
@@ -216,7 +217,8 @@ export {
   MultiElasticResourceAllocation,
   multiElasticResourceAllocation,
   encryptedHybridStorage,
-  capabilityAwareFeatureActivation
+  capabilityAwareFeatureActivation,
+  SmartCloneIntegration
 };
 
 // Export utilities
@@ -230,5 +232,5 @@ export type {
   RetrieveOptions,
   QueryOptions,
   FeatureActivationOptions,
-  TechnologySelection
+  MultiElasticRecommendation
 };
