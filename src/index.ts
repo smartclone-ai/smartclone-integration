@@ -25,7 +25,9 @@ import {
   type RetrieveOptions,
   type QueryOptions,
   type FeatureActivationOptions,
-  type MultiElasticRecommendation
+  type MultiElasticRecommendation,
+  type StorageConnectorConfig,
+  type ConnectorSyncResult
 } from './core';
 import { SmartCloneIntegration } from './SmartCloneIntegration';
 
@@ -38,6 +40,9 @@ export interface SmartCloneOptions {
   storagePrefix?: string;
   encryptionLevel?: 'none' | 'metadata' | 'full';
   persistEncryptionKey?: boolean;
+  storageConnectors?: StorageConnectorConfig[];
+  awaitStorageSync?: boolean;
+  storageSyncTargets?: string[];
   models?: Record<string, any>;
   requiredFeatures?: string[];
   optionalFeatures?: string[];
@@ -64,6 +69,9 @@ export default class SmartClone {
       storagePrefix: 'smartclone',
       encryptionLevel: 'metadata',
       persistEncryptionKey: false,
+      storageConnectors: [],
+      awaitStorageSync: false,
+      storageSyncTargets: [],
       models: {},
       requiredFeatures: [],
       optionalFeatures: [],
@@ -87,7 +95,10 @@ export default class SmartClone {
     this._storage = await encryptedHybridStorage({
       storagePrefix: this.options.storagePrefix,
       encryptionLevel: this.options.encryptionLevel,
-      persistEncryptionKey: this.options.persistEncryptionKey
+      persistEncryptionKey: this.options.persistEncryptionKey,
+      connectors: this.options.storageConnectors,
+      awaitSyncByDefault: this.options.awaitStorageSync,
+      defaultSyncTargets: this.options.storageSyncTargets
     });
 
     // Initialize feature activation
@@ -232,5 +243,7 @@ export type {
   RetrieveOptions,
   QueryOptions,
   FeatureActivationOptions,
-  MultiElasticRecommendation
+  MultiElasticRecommendation,
+  StorageConnectorConfig,
+  ConnectorSyncResult
 };

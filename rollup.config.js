@@ -11,12 +11,14 @@ export default [
         file: 'dist/index.js',
         format: 'cjs',
         sourcemap: true,
-        exports: 'named'
+        exports: 'named',
+        inlineDynamicImports: true
       },
       {
         file: 'dist/index.esm.js',
         format: 'esm',
-        sourcemap: true
+        sourcemap: true,
+        inlineDynamicImports: true
       },
       {
         file: 'dist/index.umd.js',
@@ -24,6 +26,7 @@ export default [
         name: 'SmartClone',
         sourcemap: true,
         exports: 'named',
+        inlineDynamicImports: true,
         plugins: [terser()]
       }
     ],
