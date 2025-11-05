@@ -45,6 +45,15 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-backend-webgl": "^4.22.0",
+    "onnxruntime-web": "^1.16.3",
+    "@xenova/transformers": "^2.8.0"
+  },
+  "peerDependencies": {
+    "@mlc-ai/web-llm": "^0.2.79"
+  },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^25.0.7",
     "@rollup/plugin-node-resolve": "^15.2.3",

@@ -19,7 +19,7 @@ export {
   multiElasticResourceAllocation,
   type ResourceAllocationOptions,
   type ResourceAllocation,
-  type TechnologySelection
+  type MultiElasticRecommendation
 } from './multiElasticResourceAllocation';
 
 export {
