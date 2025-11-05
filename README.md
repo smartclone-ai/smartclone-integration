@@ -21,6 +21,7 @@ A lightweight library providing hardware-adaptive AI scaling in browsers with hy
 
 - **Hardware-adaptive AI scaling**: Automatically adjusts AI complexity based on detected hardware capabilities
 - **Hybrid local storage**: Combined vector, graph, and relational storage with zero-knowledge encryption
+- **External storage connectors**: Synchronise encrypted payloads to local disk or cloud storage providers like OneDrive, Google Drive, and pCloud
 - **Progressive enhancement**: Gradual activation of AI features based on device capability
 - **Zero-knowledge encryption**: Client-side encryption for privacy-first AI applications
 - **Edge computing**: Run AI workloads locally in the browser
@@ -99,6 +100,39 @@ const id = await sc.store([0.1, 0.2, 0.3], {
 // Retrieve data
 const data = await sc.retrieve(id);
 ```
+
+#### External storage connectors
+
+```typescript
+const sc = new SmartClone({
+  storageConnectors: [
+    {
+      type: 'onedrive',
+      accessToken: process.env.MS_GRAPH_TOKEN!,
+      rootPath: 'Apps/SmartClone'
+    },
+    {
+      type: 'local-disk',
+      directory: '/var/lib/smartclone/storage'
+    }
+  ],
+  awaitStorageSync: true
+});
+
+await sc.initialize();
+
+// Store and synchronise across configured providers
+await sc.store({ foo: 'bar' }, { metadata: { source: 'demo' } });
+```
+
+Available connector types:
+
+- `local-disk`: Persist payloads to the host filesystem (Node.js environments).
+- `onedrive`: Upload encrypted payloads through the Microsoft Graph API.
+- `googledrive`: Upload encrypted payloads to Google Drive.
+- `pcloud`: Upload encrypted payloads to pCloud accounts.
+
+All connectors operate on encrypted payloads produced by SmartClone, keeping metadata and content private.
 
 ### Feature Detection
 

@@ -20,24 +20,69 @@
  */
 
 // Types
+import {
+  buildConnectors,
+  syncPayloadAcrossConnectors,
+  type ConnectorSyncResult,
+  type StorageConnector,
+  type StorageConnectorConfig,
+  type StorageRetrieveResult,
+  type StorageSyncPayload
+} from './storageConnectors';
+
 export interface StorageOptions {
   storagePrefix?: string;
   encryptionLevel?: 'none' | 'metadata' | 'full';
   persistEncryptionKey?: boolean;
+  /**
+   * External storage connectors (local disk, cloud providers, custom implementations).
+   */
+  connectors?: StorageConnectorConfig[];
+  /**
+   * When true, store will wait for connector synchronisation to finish before resolving.
+   */
+  awaitSyncByDefault?: boolean;
+  /**
+   * Default connector targets when syncTargets are omitted in store options.
+   */
+  defaultSyncTargets?: string[];
 }
 
 export interface StoreOptions {
   type?: 'vector' | 'graph' | 'relational' | 'auto';
   metadata?: Record<string, any>;
+  /**
+   * Override connectors to synchronise with during this store operation.
+   */
+  syncTargets?: string[];
+  /**
+   * Skip connector synchronisation for this store operation.
+   */
+  skipSync?: boolean;
+  /**
+   * Await synchronisation completion before resolving store.
+   */
+  awaitSync?: boolean;
 }
 
 export interface RetrieveOptions {
   type?: 'vector' | 'graph' | 'relational' | 'auto';
+  /**
+   * Specify whether to search local memory, connectors, or both when retrieving.
+   */
+  source?: 'memory' | 'connectors' | 'all';
+  /** Optional connector preference order. */
+  connectors?: string[];
 }
 
 export interface QueryOptions {
   type?: 'vector' | 'graph' | 'relational' | 'auto';
   limit?: number;
+  /**
+   * Where to query results from.
+   */
+  source?: 'memory' | 'connectors' | 'all';
+  connectors?: string[];
 }
 
 // Simple mock implementation of crypto functions
@@ -81,7 +126,10 @@ export async function encryptedHybridStorage(options: StorageOptions = {}) {
   const {
     storagePrefix = 'smartclone',
     encryptionLevel = 'metadata',
-    persistEncryptionKey = false
+    persistEncryptionKey = false,
+    connectors: connectorConfigs = [],
+    awaitSyncByDefault = false,
+    defaultSyncTargets = []
   } = options;
 
   // Setup encryption
@@ -111,6 +159,11 @@ export async function encryptedHybridStorage(options: StorageOptions = {}) {
       }
     }
   }
+
+  // Build connectors for external persistence layers
+  const connectors: StorageConnector[] = connectorConfigs.length
+    ? await buildConnectors(connectorConfigs)
+    : [];
 
   // In-memory storage for this simplified version
   const vectorStore: Map<string, any> = new Map();
@@ -153,11 +206,12 @@ export async function encryptedHybridStorage(options: StorageOptions = {}) {
       }
 
       // Store data
+      const timestamp = Date.now();
       const item = {
         id,
         data: encryptedData,
         metadata: encryptedMetadata,
-        timestamp: Date.now()
+        timestamp
       };
 
       switch (dataType) {
@@ -172,12 +226,38 @@ export async function encryptedHybridStorage(options: StorageOptions = {}) {
           break;
       }
 
+      if (connectors.length && !options.skipSync) {
+        const payload: StorageSyncPayload = {
+          id,
+          type: dataType as 'vector' | 'graph' | 'relational',
+          data: encryptedData,
+          metadata: encryptedMetadata,
+          timestamp,
+          storeOptions: options
+        };
+
+        const syncTargets = options.syncTargets ?? defaultSyncTargets;
+        const syncPromise = syncPayloadAcrossConnectors(
+          payload,
+          connectors,
+          syncTargets.length ? syncTargets : undefined
+        );
+
+        if (options.awaitSync ?? awaitSyncByDefault) {
+          await syncPromise;
+        } else {
+          syncPromise.catch(error => {
+            console.warn('Connector synchronisation failed', error);
+          });
+        }
+      }
+
       return id;
     },
 
     // Retrieve data by ID
     async retrieve(id: string, options: RetrieveOptions = {}): Promise<any> {
-      const { type = 'auto' } = options;
+      const { type = 'auto', source = 'all', connectors: preferredConnectors } = options;
 
       let item = null;
 
@@ -200,7 +280,57 @@ export async function encryptedHybridStorage(options: StorageOptions = {}) {
       }
 
       if (!item) {
-        throw new Error(`Item with id ${id} not found`);
+        if (source === 'memory') {
+          throw new Error(`Item with id ${id} not found`);
+        }
+
+        // Attempt to retrieve from connectors
+        if (connectors.length && (source === 'connectors' || source === 'all')) {
+          const connectorOrder = preferredConnectors && preferredConnectors.length
+            ? preferredConnectors
+            : connectors.map(connector => connector.id);
+
+          for (const connectorId of connectorOrder) {
+            const connector = connectors.find(itemConnector => itemConnector.id === connectorId);
+            if (!connector || !connector.retrieve) continue;
+            try {
+              const result = await connector.retrieve({
+                id,
+                type: type !== 'auto' ? (type as 'vector' | 'graph' | 'relational') : undefined
+              });
+              if (result) {
+                const retrieved: StorageRetrieveResult = result;
+                const localItem = {
+                  id: retrieved.id,
+                  data: retrieved.data,
+                  metadata: retrieved.metadata,
+                  timestamp: retrieved.timestamp ?? Date.now()
+                };
+
+                switch (retrieved.type) {
+                  case 'vector':
+                    vectorStore.set(retrieved.id, localItem);
+                    break;
+                  case 'graph':
+                    graphStore.set(retrieved.id, localItem);
+                    break;
+                  case 'relational':
+                    relationalStore.set(retrieved.id, localItem);
+                    break;
+                }
+
+                item = localItem;
+                break;
+              }
+            } catch (error) {
+              console.warn(`Failed to retrieve item ${id} from connector ${connectorId}`, error);
+            }
+          }
+        }
+
+        if (!item) {
+          throw new Error(`Item with id ${id} not found`);
+        }
       }
 
       // Decrypt if needed
@@ -227,44 +357,100 @@ export async function encryptedHybridStorage(options: StorageOptions = {}) {
     async query(query: any, options: QueryOptions = {}): Promise<any[]> {
       const {
         type = 'auto',
-        limit = 10
+        limit = 10,
+        source = 'memory',
+        connectors: preferredConnectors
       } = options;
 
       // This is a simplified implementation
       // A real implementation would have proper querying logic for each type
 
-      if (type === 'auto') {
-        // For auto mode, query all stores
-        const allResults = [
-          ...Array.from(vectorStore.values()),
-          ...Array.from(graphStore.values()),
-          ...Array.from(relationalStore.values())
-        ];
-        return allResults.slice(0, limit).map(item => ({ id: item.id }));
+      const memoryResults: any[] = [];
+
+      if (source === 'memory' || source === 'all') {
+        if (type === 'auto') {
+          const allResults = [
+            ...Array.from(vectorStore.values()),
+            ...Array.from(graphStore.values()),
+            ...Array.from(relationalStore.values())
+          ];
+          memoryResults.push(...allResults.map(item => ({ id: item.id })));
+        } else if (type === 'vector') {
+          memoryResults.push(...Array.from(vectorStore.values()).map(item => ({ id: item.id })));
+        } else if (type === 'graph') {
+          memoryResults.push(...Array.from(graphStore.values()).map(item => ({ id: item.id })));
+        } else if (type === 'relational') {
+          memoryResults.push(...Array.from(relationalStore.values()).map(item => ({ id: item.id })));
+        }
       }
 
-      if (type === 'vector') {
-        // For vector store, we'd implement vector similarity search
-        return Array.from(vectorStore.values())
-          .slice(0, limit)
-          .map(item => ({ id: item.id }));
+      const connectorResults: any[] = [];
+      if (connectors.length && (source === 'connectors' || source === 'all')) {
+        const connectorOrder = preferredConnectors && preferredConnectors.length
+          ? preferredConnectors
+          : connectors.map(connector => connector.id);
+
+        for (const connectorId of connectorOrder) {
+          const connector = connectors.find(itemConnector => itemConnector.id === connectorId);
+          if (!connector || !connector.list) continue;
+          try {
+            const listResult = await connector.list({ limit });
+            connectorResults.push(
+              ...listResult.entries.map(entry => ({
+                id: entry.id,
+                providerId: connector.id,
+                type: entry.type,
+                timestamp: entry.timestamp
+              }))
+            );
+          } catch (error) {
+            console.warn(`Connector ${connectorId} query failed`, error);
+          }
+        }
       }
 
-      if (type === 'graph') {
-        // For graph store, we'd implement graph traversal
-        return Array.from(graphStore.values())
-          .slice(0, limit)
-          .map(item => ({ id: item.id }));
+      const combined = source === 'connectors'
+        ? connectorResults
+        : source === 'memory'
+          ? memoryResults
+          : [...memoryResults, ...connectorResults];
+
+      return combined.slice(0, limit);
+    },
+
+    /**
+     * Trigger synchronisation for a given identifier with optional connector targets.
+     */
+    async sync(id: string, targets?: string[]): Promise<ConnectorSyncResult[]> {
+      if (!connectors.length) return [];
+
+      const item = vectorStore.get(id) || graphStore.get(id) || relationalStore.get(id);
+      if (!item) {
+        throw new Error(`Item with id ${id} not found in local storage for synchronisation`);
       }
 
-      if (type === 'relational') {
-        // For relational store, we'd implement filtering
-        return Array.from(relationalStore.values())
-          .slice(0, limit)
-          .map(item => ({ id: item.id }));
-      }
+      const type = vectorStore.has(id) ? 'vector' : graphStore.has(id) ? 'graph' : 'relational';
 
-      return [];
+      const payload: StorageSyncPayload = {
+        id,
+        type,
+        data: item.data,
+        metadata: item.metadata,
+        timestamp: item.timestamp
+      };
+
+      return syncPayloadAcrossConnectors(
+        payload,
+        connectors,
+        targets && targets.length ? targets : undefined
+      );
+    },
+
+    /**
+     * Access configured connectors for advanced scenarios.
+     */
+    getConnectors(): StorageConnector[] {
+      return [...connectors];
     },
 
     // Encryption utilities

@@ -31,6 +31,16 @@ export {
 } from './encryptedHybridStorage';
 
 export {
+  buildConnectors,
+  syncPayloadAcrossConnectors,
+  type StorageConnector,
+  type StorageConnectorConfig,
+  type StorageSyncPayload,
+  type StorageRetrieveResult,
+  type ConnectorSyncResult
+} from './storageConnectors';
+
+export {
   capabilityAwareFeatureActivation,
   type FeatureActivationOptions,
   type FeatureStatus,
